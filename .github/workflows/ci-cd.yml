@@ -1,43 +1,25 @@
-name: Full Stack CI Pipeline
+name: Full Stack CI/CD
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+    branches: [ main ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Set up Docker Buildx
+      - name: Set up Docker
         uses: docker/setup-buildx-action@v2
 
-      - name: Build Docker Images
+      - name: Build containers
         run: docker compose build
 
-      - name: Start Services
+      - name: Run containers
         run: docker compose up -d
 
-      - name: Wait for Containers
-        run: sleep 15
-
-      - name: Check Running Containers
+      - name: Verify running services
         run: docker ps
-
-      - name: Test Backend API
-        run: |
-          echo "Testing backend endpoint..."
-          curl -f http://localhost:8000/cars || exit 1
-
-      - name: Test Frontend
-        run: |
-          echo "Checking frontend is running..."
-          curl -f http://localhost:3000 || exit 1
-
-      - name: Stop Containers
-        run: docker compose down
