@@ -7,10 +7,11 @@ on:
     branches: [ main ]
 
 env:
-  PROJECT_ID: venu-5198
-  REGION: asia-south1
-  ARTIFACT_REPO: backend-repo
+  PROJECT_ID: ${{ secrets.GCP_PROJECT }}
+  REGION: ${{ secrets.GCP_REGION }} # This is asia-south1 (for Artifact Registry)
+  ARTIFACT_REPO: ${{ secrets.ARTIFACT_REGISTRY_REPO }}
   GKE_CLUSTER: ${{ secrets.GKE_CLUSTER }}
+  GKE_REGION: us-east1 # ✅ GKE cluster region (fixed)
 
 jobs:
   ci:
@@ -45,19 +46,27 @@ jobs:
 
       - name: Install frontend deps
         run: |
-          cd frontend
-          npm install || echo "⚠️ Frontend dependencies not installed (no package.json found)"
+          if [ -d frontend ] && [ -f frontend/package.json ]; then
+            cd frontend
+            npm install
+          else
+            echo "⚠️ No frontend directory or package.json found"
+          fi
 
       # ================= LINTING =================
       - name: Run backend lint (flake8)
         run: |
           cd backend
-          flake8 || true   # Allow warnings
+          flake8 || true
 
       - name: Run frontend lint (eslint)
         run: |
-          cd frontend
-          if [ -f package.json ]; then npx eslint . || true; else echo "⚠️ No frontend files to lint"; fi
+          if [ -d frontend ] && [ -f frontend/package.json ]; then
+            cd frontend
+            npx eslint . || true
+          else
+            echo "⚠️ No frontend files to lint"
+          fi
 
       # ================= SECURITY SCANS =================
       - name: Run Bandit (Python security)
@@ -67,8 +76,10 @@ jobs:
 
       - name: Run npm audit (frontend)
         run: |
-          cd frontend
-          if [ -f package.json ]; then npm audit --json > audit.json || true; fi
+          if [ -d frontend ] && [ -f frontend/package.json ]; then
+            cd frontend
+            npm audit --json > audit.json || true
+          fi
 
       # ================= TESTS =================
       - name: Run backend tests (pytest)
@@ -78,8 +89,10 @@ jobs:
 
       - name: Run frontend tests (jest)
         run: |
-          cd frontend
-          if [ -f package.json ]; then npm test -- --watchAll=false --silent || echo "⚠️ No frontend tests found"; fi
+          if [ -d frontend ] && [ -f frontend/package.json ]; then
+            cd frontend
+            npm test -- --watchAll=false --silent || echo "⚠️ No frontend tests found"
+          fi
 
       # ================= FILESYSTEM SCAN =================
       - name: Run gitleaks (file scan)
@@ -90,17 +103,22 @@ jobs:
       # ================= DOCKER BUILD =================
       - name: Set image names (backend)
         id: set-backend-image
-        run: echo "img=asia-south1-docker.pkg.dev/venu-5198/backend-repo/carshop-backend:${{ github.sha }}" >> $GITHUB_OUTPUT
+        run: echo "img=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/carshop-backend:${{ github.sha }}" >> $GITHUB_OUTPUT
 
       - name: Set image names (frontend)
         id: set-frontend-image
-        run: echo "img=asia-south1-docker.pkg.dev/venu-5198/backend-repo/carshop-frontend:${{ github.sha }}" >> $GITHUB_OUTPUT
+        run: echo "img=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/carshop-frontend:${{ github.sha }}" >> $GITHUB_OUTPUT
 
       - name: Build backend Docker image
         run: docker build -t ${{ steps.set-backend-image.outputs.img }} ./backend
 
       - name: Build frontend Docker image
-        run: docker build -t ${{ steps.set-frontend-image.outputs.img }} ./frontend
+        run: |
+          if [ -d frontend ]; then
+            docker build -t ${{ steps.set-frontend-image.outputs.img }} ./frontend
+          else
+            echo "⚠️ Skipping frontend build - folder not found"
+          fi
 
       # ================= TRIVY SCANS =================
       - name: Install Trivy
@@ -125,13 +143,18 @@ jobs:
           credentials_json: ${{ secrets.GCP_CREDENTIALS }}
 
       - name: Configure docker for Artifact Registry
-        run: gcloud --quiet auth configure-docker asia-south1-docker.pkg.dev
+        run: gcloud --quiet auth configure-docker ${REGION}-docker.pkg.dev
 
       - name: Push backend image
         run: docker push ${{ steps.set-backend-image.outputs.img }}
 
       - name: Push frontend image
-        run: docker push ${{ steps.set-frontend-image.outputs.img }}
+        run: |
+          if [ -d frontend ]; then
+            docker push ${{ steps.set-frontend-image.outputs.img }}
+          else
+            echo "⚠️ Skipping frontend push - folder not found"
+          fi
 
       # ================= COMPLETION =================
       - name: Notify completion
@@ -152,12 +175,15 @@ jobs:
       - name: Configure gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: venu-5198
+          project_id: ${{ secrets.GCP_PROJECT }}
           export_default_credentials: true
 
-      - name: Get GKE credentials
+      - name: Get GKE credentials (correct region)
         run: |
-          gcloud container clusters get-credentials ${{ secrets.GKE_CLUSTER }} --region asia-south1
+          gcloud container clusters get-credentials ${{ secrets.GKE_CLUSTER }} --region ${{ env.GKE_REGION }} || \
+          (echo "⚠️ Fallback to auto-detecting region" && \
+           REGION=$(gcloud container clusters list --format='value(location)' --filter="name=${{ secrets.GKE_CLUSTER }}") && \
+           gcloud container clusters get-credentials ${{ secrets.GKE_CLUSTER }} --region $REGION)
 
       - name: Replace image tags in K8s manifests
         run: |
