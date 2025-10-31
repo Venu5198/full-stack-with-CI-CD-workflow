@@ -159,6 +159,11 @@ jobs:
           echo "Connecting to GKE in region ${{ env.GKE_REGION }}..."
           gcloud container clusters get-credentials ${{ secrets.GKE_CLUSTER }} --region ${{ env.GKE_REGION }}
 
+      - name: Install GKE Auth Plugin
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y google-cloud-sdk-gke-gcloud-auth-plugin
+
       - name: Replace image tags
         run: |
           sed -i "s|<BACKEND_IMAGE>|${{ needs.ci.outputs.backend_image }}|g" backend/k8s/*.yaml
