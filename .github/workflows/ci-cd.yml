@@ -8,10 +8,10 @@ on:
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT }}
-  REGION: us-east1                        # ✅ Artifact Registry region
-  ARTIFACT_REPO: backend-repo             # ✅ must exist in us-east1
+  REGION: asia-south1                    # ✅ Artifact Registry region (confirmed)
+  ARTIFACT_REPO: backend-repo            # ✅ Existing repository
   GKE_CLUSTER: ${{ secrets.GKE_CLUSTER }}
-  GKE_REGION: us-east1                    # ✅ GKE cluster region
+  GKE_REGION: us-east1                   # ✅ GKE cluster region (unchanged)
 
 jobs:
   ci:
@@ -21,11 +21,9 @@ jobs:
       frontend_image: ${{ steps.set-frontend-image.outputs.img }}
 
     steps:
-      # ================= CHECKOUT =================
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # ================= SETUP LANGUAGES =================
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -36,7 +34,6 @@ jobs:
         with:
           node-version: "18"
 
-      # ================= INSTALL DEPENDENCIES =================
       - name: Install backend dependencies
         run: |
           cd backend
@@ -53,11 +50,10 @@ jobs:
             echo "⚠️ No frontend folder or package.json found"
           fi
 
-      # ================= LINTING =================
-      - name: Backend lint (flake8)
+      - name: Backend lint
         run: cd backend && flake8 || true
 
-      - name: Frontend lint (eslint)
+      - name: Frontend lint
         run: |
           if [ -d frontend ] && [ -f frontend/package.json ]; then
             cd frontend
@@ -66,34 +62,31 @@ jobs:
             echo "⚠️ No frontend files to lint"
           fi
 
-      # ================= SECURITY SCANS =================
-      - name: Run Bandit (Python)
+      - name: Backend security (Bandit)
         run: cd backend && bandit -r . -lll -f json -o bandit-report.json || true
 
-      - name: Run npm audit (frontend)
+      - name: Frontend security (npm audit)
         run: |
           if [ -d frontend ] && [ -f frontend/package.json ]; then
             cd frontend
             npm audit --json > audit.json || true
           fi
 
-      # ================= TESTS =================
-      - name: Run backend tests
+      - name: Backend tests
         run: cd backend && pytest --maxfail=1 --disable-warnings -q || echo "⚠️ No backend tests found"
 
-      - name: Run frontend tests
+      - name: Frontend tests
         run: |
           if [ -d frontend ] && [ -f frontend/package.json ]; then
             cd frontend
             npm test -- --watchAll=false --silent || echo "⚠️ No frontend tests found"
           fi
 
-      # ================= DOCKER BUILD =================
-      - name: Set image name (backend)
+      - name: Set backend image name
         id: set-backend-image
         run: echo "img=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/carshop-backend:${{ github.sha }}" >> $GITHUB_OUTPUT
 
-      - name: Set image name (frontend)
+      - name: Set frontend image name
         id: set-frontend-image
         run: echo "img=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/carshop-frontend:${{ github.sha }}" >> $GITHUB_OUTPUT
 
@@ -108,11 +101,9 @@ jobs:
             echo "⚠️ Skipping frontend build - folder not found"
           fi
 
-      # ================= SECURITY SCAN (TRIVY) =================
       - name: Install Trivy
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y wget
+          sudo apt-get update -y && sudo apt-get install -y wget
           wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo gpg --dearmor -o /usr/share/keyrings/trivy.gpg
           echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/trivy.list
           sudo apt-get update -y && sudo apt-get install -y trivy
@@ -123,14 +114,13 @@ jobs:
       - name: Trivy scan (frontend)
         run: trivy image --exit-code 0 --severity HIGH,CRITICAL ${{ steps.set-frontend-image.outputs.img }} || true
 
-      # ================= PUSH IMAGES =================
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_CREDENTIALS }}
 
       - name: Configure Docker for Artifact Registry
-        run: gcloud --quiet auth configure-docker ${{ env.REGION }}-docker.pkg.dev
+        run: gcloud --quiet auth configure-docker asia-south1-docker.pkg.dev
 
       - name: Push backend image
         run: docker push ${{ steps.set-backend-image.outputs.img }}
@@ -166,16 +156,13 @@ jobs:
 
       - name: Get GKE credentials
         run: |
-          echo "Attempting to connect to GKE in region ${{ env.GKE_REGION }}..."
-          gcloud container clusters get-credentials ${{ secrets.GKE_CLUSTER }} --region ${{ env.GKE_REGION }} || \
-          (echo "⚠️ Auto-detecting region..." && \
-           REGION=$(gcloud container clusters list --format='value(location)' --filter="name=${{ secrets.GKE_CLUSTER }}") && \
-           gcloud container clusters get-credentials ${{ secrets.GKE_CLUSTER }} --region $REGION)
+          echo "Connecting to GKE in region ${{ env.GKE_REGION }}..."
+          gcloud container clusters get-credentials ${{ secrets.GKE_CLUSTER }} --region ${{ env.GKE_REGION }}
 
-      - name: Replace image tags in K8s YAMLs
+      - name: Replace image tags
         run: |
           sed -i "s|<BACKEND_IMAGE>|${{ needs.ci.outputs.backend_image }}|g" k8s/*.yaml
           sed -i "s|<FRONTEND_IMAGE>|${{ needs.ci.outputs.frontend_image }}|g" k8s/*.yaml
 
-      - name: Apply Kubernetes manifests
+      - name: Deploy to GKE
         run: kubectl apply -f k8s/
