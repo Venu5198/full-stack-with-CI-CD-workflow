@@ -107,8 +107,10 @@ jobs:
         run: |
           sudo apt-get update -y
           sudo apt-get install -y wget
-          wget -qO- https://github.com/aquasecurity/trivy/releases/latest/download/trivy_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m).tar.gz | tar xz
-          sudo mv trivy /usr/local/bin/
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo gpg --dearmor -o /usr/share/keyrings/trivy.gpg
+          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update -y
+          sudo apt-get install -y trivy
 
       - name: Scan backend image with Trivy
         run: trivy image --exit-code 0 --severity HIGH,CRITICAL ${{ steps.set-backend-image.outputs.img }} || true
