@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: carshop-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: carshop-frontend
+  template:
+    metadata:
+      labels:
+        app: carshop-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: <your-docker-username>/carshop-frontend:latest
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+spec:
+  type: LoadBalancer
+  selector:
+    app: carshop-frontend
+  ports:
+    - port: 80
+      targetPort: 80
