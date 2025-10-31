@@ -161,8 +161,8 @@ jobs:
 
       - name: Replace image tags
         run: |
-          sed -i "s|<BACKEND_IMAGE>|${{ needs.ci.outputs.backend_image }}|g" k8s/*.yaml
-          sed -i "s|<FRONTEND_IMAGE>|${{ needs.ci.outputs.frontend_image }}|g" k8s/*.yaml
+          sed -i "s|<BACKEND_IMAGE>|${{ needs.ci.outputs.backend_image }}|g" backend/k8s/*.yaml
+          sed -i "s|<FRONTEND_IMAGE>|${{ needs.ci.outputs.frontend_image }}|g" backend/k8s/*.yaml || true
 
       - name: Deploy to GKE
-        run: kubectl apply -f k8s/
+        run: kubectl apply -f backend/k8s/
