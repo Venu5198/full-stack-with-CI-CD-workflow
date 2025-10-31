@@ -44,7 +44,7 @@ jobs:
       - name: Install frontend deps
         run: |
           cd frontend
-          npm ci
+          npm install
 
       # ========== LINTING & STYLE ==========
       - name: Run backend lint (flake8)
