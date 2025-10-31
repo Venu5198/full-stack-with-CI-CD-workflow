@@ -39,7 +39,7 @@ jobs:
           cd backend
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install -r requirements-dev.txt
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
 
       - name: Install frontend deps
         run: |
@@ -50,7 +50,7 @@ jobs:
       - name: Run backend lint (flake8)
         run: |
           cd backend
-          flake8 || true   # do not fail entire CI if style only (change to fail if you want)
+          flake8 || true   # Allow style warnings
 
       - name: Run frontend lint (eslint)
         run: |
@@ -86,7 +86,7 @@ jobs:
           args: detect --source . --redact
 
       # ========== DOCKER BUILD ==========
-      - name: Set image names
+      - name: Set image names (backend)
         id: set-backend-image
         run: |
           echo "img=us-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/carshop-backend:${{ github.sha }}" >> $GITHUB_OUTPUT
@@ -137,14 +137,9 @@ jobs:
         run: |
           docker push ${{ steps.set-frontend-image.outputs.img }}
 
-      # ========== NOTIFY TEAM ==========
-      - name: Notify Slack success (optional)
-        if: ${{ always() }}
-        uses: rtCamp/action-slack-notify@v2
-        env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-        with:
-          args: '{"text":"CI job finished for commit ${{ github.sha }}"}'
+      # ========== SIMPLE SUCCESS MESSAGE ==========
+      - name: Notify completion
+        run: echo "✅ CI pipeline completed successfully!"
 
   deploy:
     needs: ci
@@ -170,9 +165,8 @@ jobs:
 
       - name: Replace image tags in K8s manifests
         run: |
-          # Replace placeholders in k8s manifest files if needed
-          sed -i "s|<BACKEND_IMAGE>|${{ steps.ci.outputs.backend_image || format('us-docker.pkg.dev/%s/%s/carshop-backend:%s', secrets.GCP_PROJECT, secrets.ARTIFACT_REGISTRY_REPO, github.sha) }}|g" k8s/*.yaml || true
-          sed -i "s|<FRONTEND_IMAGE>|${{ steps.ci.outputs.frontend_image || format('us-docker.pkg.dev/%s/%s/carshop-frontend:%s', secrets.GCP_PROJECT, secrets.ARTIFACT_REGISTRY_REPO, github.sha) }}|g" k8s/*.yaml || true
+          sed -i "s|<BACKEND_IMAGE>|${{ needs.ci.outputs.backend_image }}|g" k8s/*.yaml || true
+          sed -i "s|<FRONTEND_IMAGE>|${{ needs.ci.outputs.frontend_image }}|g" k8s/*.yaml || true
 
       - name: Apply K8s manifests
         run: |

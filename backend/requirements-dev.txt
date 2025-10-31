@@ -6,3 +6,4 @@ motor==3.6.0
 pytest
 flake8
 bandit
+trivyt
