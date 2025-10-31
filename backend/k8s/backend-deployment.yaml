@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: <your-docker-username>/carshop-backend:latest
+          image: us-docker.pkg.dev/venu-5198/carshop-repo/backend:latest
           ports:
             - containerPort: 8000
           env:
