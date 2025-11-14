@@ -8,10 +8,10 @@ on:
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT }}
-  REGION: asia-south1                    # ✅ Artifact Registry region
-  ARTIFACT_REPO: backend-repo            # ✅ Existing repo in Artifact Registry
+  REGION: asia-south1
+  ARTIFACT_REPO: backend-repo
   GKE_CLUSTER: ${{ secrets.GKE_CLUSTER }}
-  GKE_REGION: us-east1                   # ✅ GKE cluster region
+  GKE_REGION: us-east1
 
 jobs:
   ci:
@@ -47,7 +47,7 @@ jobs:
             cd frontend
             npm install
           else
-            echo "⚠️ No frontend folder or package.json found"
+            echo "No frontend folder or package.json found"
           fi
 
       - name: Backend lint
@@ -58,8 +58,6 @@ jobs:
           if [ -d frontend ] && [ -f frontend/package.json ]; then
             cd frontend
             npx eslint . || true
-          else
-            echo "⚠️ No frontend files to lint"
           fi
 
       - name: Backend security (Bandit)
@@ -73,13 +71,13 @@ jobs:
           fi
 
       - name: Backend tests
-        run: cd backend && pytest --maxfail=1 --disable-warnings -q || echo "⚠️ No backend tests found"
+        run: cd backend && pytest --maxfail=1 --disable-warnings -q || echo "No backend tests found"
 
       - name: Frontend tests
         run: |
           if [ -d frontend ] && [ -f frontend/package.json ]; then
             cd frontend
-            npm test -- --watchAll=false --silent || echo "⚠️ No frontend tests found"
+            npm test -- --watchAll=false --silent || echo "No frontend tests found"
           fi
 
       - name: Set backend image name
@@ -90,6 +88,19 @@ jobs:
         id: set-frontend-image
         run: echo "img=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/carshop-frontend:${{ github.sha }}" >> $GITHUB_OUTPUT
 
+      # ---------------------------------------------
+      # 🔹 OIDC Authentication (No Service Account Key)
+      # ---------------------------------------------
+      - name: Authenticate to GCP (OIDC)
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: access_token
+          workload_identity_provider: "projects/<PROJECT_NUMBER>/locations/global/workloadIdentityPools/github-pool/providers/<WORKLOAD_ID_PROVIDER>"
+          service_account: "<SERVICE_ACCOUNT_EMAIL>"
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud --quiet auth configure-docker asia-south1-docker.pkg.dev
+
       - name: Build backend Docker image
         run: docker build -t ${{ steps.set-backend-image.outputs.img }} ./backend
 
@@ -97,8 +108,6 @@ jobs:
         run: |
           if [ -d frontend ]; then
             docker build -t ${{ steps.set-frontend-image.outputs.img }} ./frontend
-          else
-            echo "⚠️ Skipping frontend build - folder not found"
           fi
 
       - name: Install Trivy
@@ -114,14 +123,6 @@ jobs:
       - name: Trivy scan (frontend)
         run: trivy image --exit-code 0 --severity HIGH,CRITICAL ${{ steps.set-frontend-image.outputs.img }} || true
 
-      - name: Authenticate to GCP
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_CREDENTIALS }}
-
-      - name: Configure Docker for Artifact Registry
-        run: gcloud --quiet auth configure-docker asia-south1-docker.pkg.dev
-
       - name: Push backend image
         run: docker push ${{ steps.set-backend-image.outputs.img }}
 
@@ -129,25 +130,29 @@ jobs:
         run: |
           if [ -d frontend ]; then
             docker push ${{ steps.set-frontend-image.outputs.img }}
-          else
-            echo "⚠️ Skipping frontend push"
           fi
 
       - name: Done
-        run: echo "✅ CI completed successfully!"
+        run: echo "CI completed successfully"
 
 
   deploy:
     needs: ci
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Authenticate to GCP
+      # ---------------------------------------------
+      # 🔹 OIDC Authentication (No Service Account Key)
+      # ---------------------------------------------
+      - name: Authenticate to GCP (OIDC)
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_CREDENTIALS }}
+          token_format: access_token
+          workload_identity_provider: "projects/<PROJECT_NUMBER>/locations/global/workloadIdentityPools/github-pool/providers/<WORKLOAD_ID_PROVIDER>"
+          service_account: "<SERVICE_ACCOUNT_EMAIL>"
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
@@ -155,22 +160,13 @@ jobs:
           project_id: ${{ secrets.GCP_PROJECT }}
           export_default_credentials: true
 
-      # ✅ FIXED SECTION: Proper GKE auth plugin installation
       - name: Install GKE Auth Plugin
         run: |
-          echo "Installing GKE auth plugin..."
-          sudo apt-get update -y
-          sudo apt-get install -y apt-transport-https ca-certificates gnupg curl
-          echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | \
-            sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list
-          curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
           sudo apt-get update -y
           sudo apt-get install -y google-cloud-sdk google-cloud-sdk-gke-gcloud-auth-plugin
 
       - name: Get GKE credentials
-        run: |
-          echo "Connecting to GKE in region ${{ env.GKE_REGION }}..."
-          gcloud container clusters get-credentials ${{ secrets.GKE_CLUSTER }} --region ${{ env.GKE_REGION }}
+        run: gcloud container clusters get-credentials ${{ secrets.GKE_CLUSTER }} --region ${{ env.GKE_REGION }}
 
       - name: Replace image tags
         run: |
