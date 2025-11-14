@@ -1,5 +1,9 @@
 name: Full Stack CI/CD - CarShop
 
+permissions:
+  id-token: write
+  contents: read
+
 on:
   push:
     branches: [ main ]
